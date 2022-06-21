@@ -1,6 +1,7 @@
 import {useEffect, useState} from "react";
 import "./App.css";
 import axios from "axios";
+import { TodoistApi } from '@doist/todoist-api-typescript'
 
 const BACKEND_URL = "http://10.65.132.54:3000";
 
@@ -15,9 +16,16 @@ const BACKEND_URL = "http://10.65.132.54:3000";
 *
 * */
 
+const token = '2545a8f4423994ed282c972d6cf55d990473e5dd'
+const api = new TodoistApi(token)
+
+
+
+
 function App() {
   const [itemToAdd, setItemToAdd] = useState("");
   const [items, setItems] = useState([]);
+  const [doneItems, setDoneItems] = useState([]);
   const [searchValue, setSearchValue] = useState("");
 
   const handleChangeItem = (event) => {
@@ -25,41 +33,78 @@ function App() {
   };
 
   const handleAddItem = () => {
-    axios.post(`${BACKEND_URL}/todos`, {
-        label:itemToAdd,
-        done: false
-    }).then((response) => {
-        setItems([ ...items, response.data])
+    api.addTask({
+      content: itemToAdd,
+      completed:false,
+      //order: 1
     })
-    setItemToAdd("");
+      .then((task) => {
+        setItems([ task, ...items]);
+        setItemToAdd("");
+      }
+      )
+      .catch((error) => console.log(error))
   };
 
+  
+    
 
-  const toggleItemDone = ({ id, done }) => {
-      axios.put(`${BACKEND_URL}/todos/${id}`, {
-          done: !done
-      }).then((response) => {
-          setItems(items.map((item) => {
-              if (item.id === id) {
-                  return {
-                      ...item,
-                      done: !done
-                  }
-              }
-              return item
-          }))
-
+  const toggleItemDone = (thisItem) => {
+    if (thisItem.completed_date) {
+      api.reopenTask(thisItem.task_id)
+        .then((task) => {
+          axios.get('https://api.todoist.com/sync/v8/completed/get_all', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            }
+          })
+          .then((res) => { setDoneItems(res.data.items) })
+          .catch((error) => { console.error(error) })
+        }
+        )
+        .catch((error) => console.log(error))
+    }
+    else{
+      api.closeTask(thisItem.id)
+      .then((isSuccess) => {
+      console.log("closed task");
+      axios.get('https://api.todoist.com/sync/v8/completed/get_all', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        }
+        })
+        .then((res) => {setDoneItems(res.data.items) })
+        .catch((error) => { console.error(error) })
       })
+      .catch((error) => console.log("error in close"))
+    }
+
+
+    setItems(items.map((item) => {
+      if (item.id === thisItem.task_id) {
+          
+          return {
+              ...item,
+              completed: !thisItem.completed
+          }
+      }
+      return item
+    }))
+
+
   };
+
+  
+ 
 
   // N => map => N
     // N => filter => 0...N
   const handleItemDelete = (id) => {
-      axios.delete(`${BACKEND_URL}/todos/${id}`).then((response) => {
+    api.deleteTask(id).then((response) => {
           const deletedItem = response.data;
           console.log('Было:',items)
           const newItems = items.filter((item) => {
-              return deletedItem.id !== item.id
+              return deletedItem.task_id
           })
           console.log('Осталось:',newItems)
           setItems(newItems)
@@ -67,11 +112,22 @@ function App() {
   };
 
   useEffect(() => {
-      console.log(searchValue)
-      axios.get(`${BACKEND_URL}/todos/?filter=${searchValue}`).then((response) => {
-          setItems(response.data);
+      api.getTasks()
+        .then((tasks) => {
+          setItems(tasks); //filter by search value?
       })
-  }, [searchValue])
+        .catch((error) => console.log(error))
+
+      axios.get('https://api.todoist.com/sync/v8/completed/get_all', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        }
+        })
+      .then((res) => { 
+          setDoneItems(res.data.items) })
+      .catch((error) => { console.error(error) })
+      },[searchValue, doneItems.length])
+     
 
 
 
@@ -98,12 +154,12 @@ function App() {
         {items.length > 0 ? (
           items.map((item) => (
             <li key={item.id} className="list-group-item">
-              <span className={`todo-list-item${item.done ? " done" : ""}`}>
+              <span className={`todo-list-item${item.completed ? " done" : ""}`}>
                 <span
                   className="todo-list-item-label"
                   onClick={() => toggleItemDone(item)}
                 >
-                  {item.label}
+                  {item.content}
                 </span>
 
                 <button
@@ -125,6 +181,7 @@ function App() {
           ))
         ) : (
           <div>No todos🤤</div>
+          
         )}
       </ul>
 
@@ -140,7 +197,29 @@ function App() {
         <button className="btn btn-outline-secondary" onClick={handleAddItem}>
           Add item
         </button>
+
+
       </div>
+      {/* List-group */}
+      <ul className="list-group todo-list" >
+        {doneItems.length > 0 ? (
+          doneItems.map((item) => (
+            <li key={item.id} className="list-group-item">
+              <span className={`todo-list-item done`}>
+                <span
+                  className="todo-list-item-label"
+                  onClick={() => toggleItemDone(item)}
+                >
+                  {item.content}
+                </span>
+              </span>
+            </li>
+          ))
+        ) : (
+          <div>No todos🤤</div>
+          
+        )}
+      </ul>
     </div>
   );
 }
